@@ -10,7 +10,7 @@ export default function Login({ onRegisterClick, onLogin }) {
     try {
         console.log('Attempting login...', { emailOrUsername, password: '***' });
         console.log('API base URL:', api.defaults.baseURL);
-        const res = await api.post('/auth/login', { emailOrUsername, password });
+        const res = await api.post('/login', { emailOrUsername, password });
         console.log('Login response:', res);
         console.log('Response data:', res.data);
         onLogin(res.data.token);

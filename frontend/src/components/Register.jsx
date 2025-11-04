@@ -11,7 +11,7 @@ export default function Register({ onLoginClick }) {
     e.preventDefault();
     if (password !== confirm) return alert('Passwords do not match');
     try {
-      const res = await api.post('/auth/register', { username, email, password });
+      const res = await api.post('/register', { username, email, password });
       alert('Registration successful — you are now logged in');
       localStorage.setItem('taleforge_token', res.data.token);
       window.location.reload();
