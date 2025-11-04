@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import api from '../api';
+import api from './api';
 
 export default function Login({ onRegisterClick, onLogin }) {
   const [emailOrUsername, setEmailOrUsername] = useState('');
@@ -10,7 +10,7 @@ export default function Login({ onRegisterClick, onLogin }) {
     try {
         console.log('Attempting login...', { emailOrUsername, password: '***' });
         console.log('API base URL:', api.defaults.baseURL);
-        const res = await api.post('/login', { emailOrUsername, password });
+        const res = await api.post('/login', { identifier: emailOrUsername, password });
         console.log('Login response:', res);
         console.log('Response data:', res.data);
         onLogin(res.data.token);
