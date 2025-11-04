@@ -32,21 +32,97 @@ export default function Dashboard({ token, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [currentView, setCurrentView] = useState('generator');
-  // State for User Details Modal
-  const [showUserDetails, setShowUserDetails] = useState(false); 
+  const [showUserDetails, setShowUserDetails] = useState(false);
+  
+  // User profile state
+  const [userProfile, setUserProfile] = useState(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    username: '',
+    email: '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  }); 
+  
+  // Story editing state
+  const [editingStory, setEditingStory] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [editPrompts, setEditPrompts] = useState('');
+  const [savingStory, setSavingStory] = useState(false);
 
   const genres = ['Fantasy', 'Sci-Fi', 'Horror', 'Comedy', 'Mystery', 'Romance', 'Adventure', 'Thriller', 'Dystopian'];
 
-  // Set auth token header globally and fetch history on component mount
+  // Set auth token header globally and fetch history and user profile on component mount
   useEffect(() => {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     fetchHistory();
+    fetchUserProfile();
   }, [token]);
 
-  // Use a simple ID derived from the token as a user identifier (for display only)
+  // Fetch user profile from backend
+  const fetchUserProfile = async () => {
+    try {
+      const res = await api.get('/auth/profile');
+      setUserProfile(res.data);
+      setProfileForm(prev => ({
+        ...prev,
+        username: res.data.username,
+        email: res.data.email
+      }));
+    } catch (err) {
+      console.error('Failed to fetch user profile:', err);
+      setErrorMessage('Failed to load user profile.');
+    }
+  };
+
+  // Handle profile form changes
+  const handleProfileChange = (e) => {
+    const { name, value } = e.target;
+    setProfileForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Update user profile
+  const handleProfileUpdate = async (e) => {
+    e.preventDefault();
+    if (profileForm.newPassword && profileForm.newPassword !== profileForm.confirmPassword) {
+      setErrorMessage('New passwords do not match');
+      return;
+    }
+
+    try {
+      const updateData = {
+        username: profileForm.username,
+        email: profileForm.email
+      };
+
+      if (profileForm.currentPassword) {
+        updateData.currentPassword = profileForm.currentPassword;
+        updateData.newPassword = profileForm.newPassword;
+      }
+
+      const res = await api.put('/auth/profile', updateData);
+      setUserProfile(res.data.user);
+      setEditingProfile(false);
+      setProfileForm(prev => ({
+        ...prev,
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      }));
+      setErrorMessage('Profile updated successfully!');
+    } catch (err) {
+      setErrorMessage(err.response?.data?.msg || 'Failed to update profile');
+    }
+  };
+
+  // Get display name for the profile button
   const userIdDisplay = useMemo(() => {
-    return `${token ? token.slice(0, 4) + '...' + token.slice(-4) : 'Guest'}`;
-  }, [token]);
+    return userProfile ? userProfile.username : 'Guest';
+  }, [userProfile]);
 
 
   // --- Data Fetching for History ---
@@ -103,17 +179,172 @@ export default function Dashboard({ token, onLogout }) {
     }
   };
 
+  // --- Story Editing Handlers ---
+  const openEditStory = (s) => {
+    setStory(s);
+    setEditContent(s.content || '');
+    setEditPrompts('');
+    setEditingStory(true);
+  };
+
+  const cancelEditStory = () => {
+    setEditingStory(false);
+    setEditContent('');
+    setEditPrompts('');
+    setErrorMessage('');
+  };
+
+  const saveEditedStory = async () => {
+    if (!story || !story._id) return;
+    setSavingStory(true);
+    setErrorMessage('');
+    try {
+      const res = await api.put(`/stories/${story._id}`, { content: editContent });
+      setStory(res.data);
+      setEditingStory(false);
+      fetchHistory();
+      setErrorMessage('Story saved successfully.');
+    } catch (err) {
+      setErrorMessage(err.response?.data?.msg || 'Failed to save story');
+    } finally {
+      setSavingStory(false);
+    }
+  };
+
+  const regenerateEditedStory = async () => {
+    if (!story || !story._id) return;
+    if (!editPrompts || editPrompts.trim().length === 0) {
+      setErrorMessage('Please provide prompts to regenerate the story.');
+      return;
+    }
+    setSavingStory(true);
+    setErrorMessage('');
+    try {
+      const res = await api.put(`/stories/${story._id}`, { prompts: editPrompts });
+      setStory(res.data);
+      setEditContent(res.data.content || '');
+      setEditingStory(false);
+      fetchHistory();
+      setErrorMessage('Story regenerated successfully.');
+    } catch (err) {
+      setErrorMessage(err.response?.data?.msg || 'Failed to regenerate story');
+    } finally {
+      setSavingStory(false);
+    }
+  };
+
   // --- Rendering Functions ---
 
   const renderUserDetailsModal = () => (
-    // User Profile Modal (dark themed)
     <div className="modal-overlay" onClick={() => setShowUserDetails(false)}>
         <div className="modal-content card" onClick={e => e.stopPropagation()}>
-            <h2>User Profile</h2>
-            <p><strong>Authenticated ID:</strong> <span style={{color: COLORS.ACCENT_2}}>{userIdDisplay}</span></p>
-            <p className="mt-2">Welcome to TaleForge! This is a placeholder for future user settings and profile details.</p>
-            <p className="text-sm subtle-text-color mt-4">Note: User data is tied to your unique authentication token.</p>
-            <button className="action-btn primary-btn mt-6" onClick={() => setShowUserDetails(false)}>Close</button>
+            <h2>{editingProfile ? 'Edit Profile' : 'User Profile'}</h2>
+            
+            {!editingProfile ? (
+              // View Mode
+              <div className="profile-info">
+                <div className="info-group">
+                  <label>Username</label>
+                  <p>{userProfile?.username}</p>
+                </div>
+                <div className="info-group">
+                  <label>Email</label>
+                  <p>{userProfile?.email}</p>
+                </div>
+                <div className="info-group">
+                  <label>Member Since</label>
+                  <p>{new Date(userProfile?.createdAt).toLocaleDateString()}</p>
+                </div>
+                <div className="info-group">
+                  <label>Stories Created</label>
+                  <p>{storiesHistory.length}</p>
+                </div>
+                <button 
+                  className="action-btn primary-btn mt-4" 
+                  onClick={() => setEditingProfile(true)}
+                >
+                  Edit Profile
+                </button>
+              </div>
+            ) : (
+              // Edit Mode
+              <form onSubmit={handleProfileUpdate} className="profile-form">
+                <div className="input-group">
+                  <label>Username</label>
+                  <input
+                    name="username"
+                    value={profileForm.username}
+                    onChange={handleProfileChange}
+                    placeholder="Enter new username"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Email</label>
+                  <input
+                    name="email"
+                    type="email"
+                    value={profileForm.email}
+                    onChange={handleProfileChange}
+                    placeholder="Enter new email"
+                  />
+                </div>
+                <div className="password-section">
+                  <h3>Change Password</h3>
+                  <div className="input-group">
+                    <label>Current Password</label>
+                    <input
+                      name="currentPassword"
+                      type="password"
+                      value={profileForm.currentPassword}
+                      onChange={handleProfileChange}
+                      placeholder="Enter current password"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>New Password</label>
+                    <input
+                      name="newPassword"
+                      type="password"
+                      value={profileForm.newPassword}
+                      onChange={handleProfileChange}
+                      placeholder="Enter new password"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Confirm New Password</label>
+                    <input
+                      name="confirmPassword"
+                      type="password"
+                      value={profileForm.confirmPassword}
+                      onChange={handleProfileChange}
+                      placeholder="Confirm new password"
+                    />
+                  </div>
+                </div>
+                <div className="button-group">
+                  <button type="submit" className="action-btn primary-btn">
+                    Save Changes
+                  </button>
+                  <button 
+                    type="button" 
+                    className="action-btn secondary-btn"
+                    onClick={() => {
+                      setEditingProfile(false);
+                      setProfileForm(prev => ({
+                        ...prev,
+                        username: userProfile.username,
+                        email: userProfile.email,
+                        currentPassword: '',
+                        newPassword: '',
+                        confirmPassword: ''
+                      }));
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
         </div>
     </div>
   );
@@ -157,9 +388,44 @@ export default function Dashboard({ token, onLogout }) {
       
       {story && (
         <section className="card story-output-card">
-          <h3>{story.title}</h3>
-          <p className="subtle-text-color mb-3">Genres: {story.genres.join(', ')}</p>
-          <div className="story-box whitespace-pre-wrap">{story.content}</div>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px'}}>
+            <div>
+              <h3 style={{margin:0}}>{story.title}</h3>
+              <p className="subtle-text-color mb-3" style={{marginTop:'6px'}}>Genres: {story.genres.join(', ')}</p>
+            </div>
+            <div style={{display:'flex', gap:'10px'}}>
+              {!editingStory ? (
+                <>
+                  <button className="action-btn" onClick={() => openEditStory(story)}>Edit Story</button>
+                </>
+              ) : (
+                <>
+                  <button className="action-btn secondary-btn" onClick={cancelEditStory}>Cancel Edit</button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {!editingStory ? (
+            <div className="story-box whitespace-pre-wrap">{story.content}</div>
+          ) : (
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              <div className="input-group">
+                <label>Edit Story Manually</label>
+                <textarea rows={12} value={editContent} onChange={e => setEditContent(e.target.value)} />
+              </div>
+
+              <div className="input-group">
+                <label>Or regenerate from prompts (give instructions/changes)</label>
+                <textarea rows={4} value={editPrompts} onChange={e => setEditPrompts(e.target.value)} placeholder="e.g., Make the ending happier and expand the dialogue in chapter 2" />
+              </div>
+
+              <div style={{display:'flex', gap:'10px'}}>
+                <button className="action-btn primary-btn" onClick={saveEditedStory} disabled={savingStory}>{savingStory ? 'SAVING...' : 'Save Changes'}</button>
+                <button className="action-btn" onClick={regenerateEditedStory} disabled={savingStory}>{savingStory ? 'REGENERATING...' : 'Regenerate from Prompts'}</button>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </main>
@@ -200,7 +466,7 @@ export default function Dashboard({ token, onLogout }) {
   return (
     <div className="container dashboard-container">
       <header className="main-header">
-        <h1 className="logo">TaleForge</h1>
+        <h1 className="logo">TaleForger  </h1>
         
         <nav className="header-nav">
           <button 
@@ -225,7 +491,7 @@ export default function Dashboard({ token, onLogout }) {
             aria-label={`User Profile: ${userIdDisplay}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block mr-1"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            {userIdDisplay}
+            <span className="username-display">{userIdDisplay}</span>
           </button>
           {/* Logout Button (moved to header bar for better layout) */}
           <button id="logout-btn" className="action-btn logout-btn" onClick={onLogout}>
@@ -260,22 +526,33 @@ export default function Dashboard({ token, onLogout }) {
             --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
 
+        /* Ensure predictable sizing so inputs and cards don't overflow their containers */
+        html, *, *::before, *::after { box-sizing: border-box; }
+
         /* --- GLOBAL STYLES --- */
         body {
-            font-family: 'Inter', sans-serif; /* Using Inter as per default, but can be changed to Roboto */
+            font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             padding: 20px;
-            box-sizing: border-box;
             min-height: 100vh;
         }
 
         .container {
-            max-width: 900px;
+            max-width: 860px; /* slightly narrower for more consistent spacing */
             width: 100%;
             margin: 0 auto;
+            padding: 0 12px; /* small horizontal padding to keep children from touching edges */
         }
-        
+
+        /* Make main content sections use a consistent column layout */
+        .generator-container, .history-container {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+          align-items: stretch;
+        }
+
         /* --- LAYOUT & HEADER --- */
         .main-header {
             display: flex;
@@ -284,329 +561,203 @@ export default function Dashboard({ token, onLogout }) {
             margin-bottom: 2rem;
             padding-bottom: 1.5rem;
             border-bottom: 2px solid var(--card-color);
-            position: relative; /* Context for absolute logout button, though we are removing that */
+            gap: 1rem;
         }
-        
+
         .logo {
-            font-size: 2.5rem;
+            font-size: 2.2rem;
             font-weight: 700;
             color: var(--accent-color-1);
             text-shadow: 0 0 10px var(--accent-color-1);
             letter-spacing: 1px;
             margin: 0;
         }
-        
-        .header-nav {
-          display: flex;
-          gap: 15px;
-        }
 
-        /* --- FIX: Make user-controls a flex container for side-by-side buttons --- */
-        .user-controls {
-            display: flex; 
-            gap: 10px;
-            align-items: center;
-        }
-        /* --- END FIX --- */
+        .header-nav { display: flex; gap: 12px; align-items: center; }
+
+        .user-controls { display: flex; gap: 10px; align-items: center; }
 
         /* --- CARD STYLES --- */
         .card, .modal-content {
             background-color: var(--card-color);
-            padding: 2.5rem;
-            border-radius: 20px;
+            padding: 2rem; /* slightly reduced padding to avoid overflow */
+            border-radius: 18px;
             box-shadow: var(--card-shadow);
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             border: 2px solid var(--accent-color-2);
-            transition: transform 0.3s ease;
+            transition: transform 0.25s ease;
+            width: 100%;
         }
-        
-        .card:hover {
-            transform: translateY(-5px);
-        }
+
+        .card:hover { transform: translateY(-4px); }
 
         h2, h3 {
             color: var(--accent-color-2);
             text-shadow: 0 0 5px var(--accent-color-2);
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
             font-weight: 700;
         }
-        
+
         .card h2 {
             text-align: center;
-            border-bottom: 1px solid var(--card-color); /* Subtle divider */
+            border-bottom: 1px solid var(--card-color);
             padding-bottom: 10px;
         }
 
         /* --- BUTTONS --- */
-        .action-btn {
-            padding: 12px 25px;
-            border: none;
-            border-radius: 50px;
-            font-size: 1rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-        }
-        
-        .nav-btn {
-            background: var(--card-color);
-            color: var(--subtle-text-color);
-            border: 1px solid var(--card-color);
-            padding: 10px 18px;
-        }
-        .nav-btn.active {
-            background-color: var(--accent-color-1);
-            color: var(--bg-color);
-            box-shadow: 0 0 10px var(--accent-color-1);
-        }
-        .nav-btn:hover {
-            transform: translateY(-1px);
-            background-color: #33334d;
-        }
-        .nav-btn.active:hover {
-            background-color: ${COLORS.ACCENT_1};
-        }
+        .action-btn { padding: 10px 18px; border: none; border-radius: 50px; font-size: 0.95rem; font-weight: 700; cursor: pointer; text-transform: uppercase; }
 
-        .primary-btn {
-            background-color: var(--accent-color-2);
-            color: var(--bg-color);
-            width: 100%;
-        }
+        .nav-btn { background: var(--card-color); color: var(--subtle-text-color); border: 1px solid var(--card-color); padding: 9px 14px; }
+        .nav-btn.active { background-color: var(--accent-color-1); color: var(--bg-color); box-shadow: 0 0 10px var(--accent-color-1); }
+        .nav-btn:hover { transform: translateY(-1px); background-color: #33334d; }
 
-        .primary-btn:hover:not(:disabled) {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(138, 255, 138, 0.4);
-        }
+        .primary-btn { background-color: var(--accent-color-2); color: var(--bg-color); width: 100%; }
+        .primary-btn:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(138, 255, 138, 0.35); }
+        .primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .primary-btn:disabled {
-            background-color: var(--accent-color-2);
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        .logout-btn {
-            background: transparent;
-            color: var(--accent-color-1);
-            border: 2px solid var(--accent-color-1);
-            padding: 10px 20px;
-            /* Ensure old absolute positioning is ignored/removed */
-            position: static; 
-            top: auto;
-            right: auto;
-        }
+        .logout-btn { background: transparent; color: var(--accent-color-1); border: 2px solid var(--accent-color-1); padding: 8px 16px; }
+        .logout-btn:hover { background-color: var(--accent-color-1); color: var(--bg-color); transform: scale(1.03); }
 
-        .logout-btn:hover {
-            background-color: var(--accent-color-1);
-            color: var(--bg-color);
-            transform: scale(1.05);
+        .user-profile-btn { 
+          background: var(--card-color); 
+          color: var(--accent-color-1); 
+          border: 2px solid var(--accent-color-1); 
+          padding: 8px 16px; 
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
-        
-        .user-profile-btn {
-            background: var(--card-color);
-            color: var(--accent-color-1);
-            border: 2px solid var(--accent-color-1);
-            padding: 10px 20px;
+        .user-profile-btn:hover { 
+          background-color: var(--accent-color-1); 
+          color: var(--bg-color); 
+          transform: scale(1.03); 
         }
-        .user-profile-btn:hover {
-            background-color: var(--accent-color-1);
-            color: var(--bg-color);
-            transform: scale(1.05);
+        .username-display {
+          font-weight: 600;
+          max-width: 150px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         /* --- GENRE BUTTONS --- */
-        .genre-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            justify-content: center;
-            margin-bottom: 2rem;
-        }
+        .genre-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-start; margin-bottom: 1.25rem; }
 
-        .genre-btn {
-            padding: 12px 24px;
-            border: 2px solid var(--accent-color-1);
-            border-radius: 50px;
-            background: transparent;
-            cursor: pointer;
-            font-size: 1rem;
-            color: var(--text-color);
-            transition: all 0.3s ease-in-out;
-            text-transform: uppercase;
-        }
-
-        .genre-btn:hover {
-            background-color: var(--accent-color-1);
-            box-shadow: 0 0 15px var(--accent-color-1);
-            transform: translateY(-3px);
-        }
-
-        .genre-btn.selected {
-            background-color: var(--accent-color-2);
-            color: var(--bg-color);
-            border-color: var(--accent-color-2);
-            box-shadow: 0 0 15px var(--accent-color-2);
-            transform: scale(1.05);
-        }
+        .genre-btn { padding: 10px 18px; border: 2px solid var(--accent-color-1); border-radius: 50px; background: transparent; cursor: pointer; font-size: 0.95rem; color: var(--text-color); text-transform: uppercase; }
+        .genre-btn:hover { background-color: var(--accent-color-1); box-shadow: 0 0 12px var(--accent-color-1); transform: translateY(-2px); }
+        .genre-btn.selected { background-color: var(--accent-color-2); color: var(--bg-color); border-color: var(--accent-color-2); box-shadow: 0 0 12px var(--accent-color-2); transform: scale(1.03); }
 
         /* --- FORMS & INPUTS --- */
-        .input-group {
-            margin-bottom: 1.5rem;
-        }
-
-        label {
-            display: block;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            color: var(--subtle-text-color);
-        }
+        .hints-form { width: 100%; max-width: 100%; }
+        .input-group { margin-bottom: 1rem; }
+        label { display: block; font-weight: 700; margin-bottom: 0.5rem; color: var(--subtle-text-color); }
 
         input, textarea {
             width: 100%;
-            padding: 15px;
+            padding: 12px; /* slightly reduced */
             border: 2px solid var(--card-color);
             background-color: #33334d;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.95rem;
             color: var(--text-color);
-            transition: border-color 0.3s, box-shadow 0.3s;
+            transition: border-color 0.25s, box-shadow 0.25s;
+            resize: vertical;
         }
+        input::placeholder, textarea::placeholder { color: #9b9bb0; }
 
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: var(--accent-color-1);
-            box-shadow: 0 0 10px var(--accent-color-1);
-        }
+        input:focus, textarea:focus { outline: none; border-color: var(--accent-color-1); box-shadow: 0 0 8px var(--accent-color-1); }
 
         /* --- STORY OUTPUT --- */
-        .story-output-card {
-            border: 2px solid var(--accent-color-1);
-        }
+        .story-output-card { border: 2px solid var(--accent-color-1); }
+        .story-box { background-color: #26263b; padding: 1.6rem; border-radius: 12px; white-space: pre-wrap; line-height: 1.7; border-left: 5px solid var(--accent-color-2); max-height: 420px; overflow-y: auto; }
 
-        .story-box {
-            background-color: #26263b;
-            padding: 2rem;
-            border-radius: 12px;
-            white-space: pre-wrap;
-            line-height: 1.8;
-            border-left: 5px solid var(--accent-color-2);
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .subtle-text-color {
-            color: var(--subtle-text-color);
-        }
+        .subtle-text-color { color: var(--subtle-text-color); }
 
         /* --- HISTORY LIST --- */
-        .story-list {
-          list-style: none;
-          padding: 0;
-        }
-        .story-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 15px;
-          margin-bottom: 10px;
-          background-color: #33334d; /* Slightly different background for list items */
-          border-radius: 10px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          border-left: 5px solid var(--accent-color-1);
-          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-        }
-        .story-item:hover {
-          background-color: #3a3a55;
-          transform: scale(1.01);
-          border-left-color: var(--accent-color-2);
-        }
-        .story-info {
-          display: flex;
-          flex-direction: column;
-        }
-        .story-title {
-          font-weight: 600;
-          color: var(--text-color);
-        }
-        .story-genres {
-          font-size: 0.9rem;
-          color: var(--subtle-text-color);
-        }
-        .story-date {
-          font-size: 0.9rem;
-          color: var(--subtle-text-color);
-        }
-
+        .story-list { list-style: none; padding: 0; }
+        .story-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 10px; background-color: #33334d; border-radius: 10px; cursor: pointer; transition: all 0.2s ease; border-left: 5px solid var(--accent-color-1); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+        .story-item:hover { background-color: #3a3a55; transform: translateY(-1px); border-left-color: var(--accent-color-2); }
+        .story-info { display: flex; flex-direction: column; }
+        .story-title { font-weight: 600; color: var(--text-color); }
+        .story-genres { font-size: 0.88rem; color: var(--subtle-text-color); }
+        .story-date { font-size: 0.88rem; color: var(--subtle-text-color); }
 
         /* --- MODAL STYLES --- */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+        .modal-content { 
+          padding: 22px; 
+          animation: fadeIn 0.25s ease-out; 
+          margin: 0; 
+          border-color: var(--accent-color-1); 
+          max-width: 520px; 
+          width: 100%;
+          max-height: 90vh;
+          overflow-y: auto;
         }
-        .modal-content {
-            padding: 30px;
-            animation: fadeIn 0.3s ease-out;
-            margin: 0; /* Override margin-bottom from .card */
-            border-color: var(--accent-color-1);
+        .modal-content h2 { border-bottom: 2px solid var(--accent-color-1); padding-bottom: 10px; margin-bottom: 16px; }
+        
+        /* Profile Modal Specific Styles */
+        .profile-info .info-group {
+          margin-bottom: 16px;
+          padding: 12px;
+          background: rgba(0,0,0,0.2);
+          border-radius: 8px;
         }
-        .modal-content h2 {
-            border-bottom: 2px solid var(--accent-color-1);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
+        .profile-info .info-group label {
+          color: var(--subtle-text-color);
+          font-size: 0.9rem;
+          margin-bottom: 4px;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
+        .profile-info .info-group p {
+          color: var(--text-color);
+          font-size: 1.1rem;
+          margin: 0;
         }
+        .profile-form {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .password-section {
+          margin-top: 20px;
+          padding-top: 20px;
+          border-top: 1px solid var(--card-color);
+        }
+        .password-section h3 {
+          font-size: 1.1rem;
+          margin-bottom: 16px;
+          color: var(--accent-color-1);
+        }
+        .button-group {
+          display: flex;
+          gap: 12px;
+          margin-top: 24px;
+        }
+        .secondary-btn {
+          background: transparent;
+          border: 2px solid var(--accent-color-1);
+          color: var(--accent-color-1);
+        }
+        .secondary-btn:hover {
+          background: var(--accent-color-1);
+          color: var(--bg-color);
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
         /* --- RESPONSIVENESS --- */
         @media (max-width: 768px) {
-          .main-header {
-            flex-direction: column;
-            gap: 15px;
-            padding-bottom: 10px;
-          }
-          .logo {
-            margin-bottom: 10px;
-          }
-          .user-controls {
-            width: 100%;
-            justify-content: center;
-          }
-          .action-btn {
-            padding: 10px 15px;
-            font-size: 0.9rem;
-          }
-          .nav-btn {
-            font-size: 0.8rem;
-          }
+          .main-header { flex-direction: column; gap: 12px; padding-bottom: 10px; }
+          .logo { margin-bottom: 6px; }
+          .user-controls { width: 100%; justify-content: center; }
+          .action-btn { padding: 9px 12px; font-size: 0.9rem; }
+          .nav-btn { font-size: 0.82rem; }
+          .card { padding: 1.6rem; }
         }
         @media (max-width: 500px) {
-          .card {
-            padding: 1.5rem;
-          }
-          .user-controls {
-            flex-direction: column;
-            gap: 10px;
-          }
-          .user-profile-btn, .logout-btn {
-            width: 100%;
-            text-align: center;
-          }
-          .story-item {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 5px;
-          }
+          .card { padding: 1.2rem; }
+          .user-controls { flex-direction: column; gap: 8px; }
+          .user-profile-btn, .logout-btn { width: 100%; text-align: center; }
+          .story-item { flex-direction: column; align-items: flex-start; gap: 6px; }
         }
       `}</style>
     </div>

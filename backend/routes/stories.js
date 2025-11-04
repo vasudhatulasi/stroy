@@ -65,7 +65,7 @@ router.post('/', auth, async (req, res) => {
     }
 
     // --- 1. Construct the Generation Prompt ---
-    const systemInstruction = `You are a professional, creative fiction author. Your task is to write a compelling, continuous short story based on the user's title, hints, and specified genre(s). The story must be engaging and flow naturally without using explicit chapter titles, subheadings, or bullet points. Do not include a title or any concluding commentary (like "The End"). Simply output the story text.`;
+    const systemInstruction = `You are a professional, creative fiction author. Your task is to write a compelling, continuous short story based on the user's title, hints, and specified genre(s). The story must be engaging and flow naturally without using explicit chapter titles, subheadings, or bullet points. Do not include a title or any concluding commentary (like "The End"). Simply output the story text. Use a decent English vocabulary not too simple nor too complex.`;
     
     const userPrompt = `Story Title: "${title}"\nGenres: ${genres.join(', ')}\nCore Plot and Elements to Include (Hints): ${hints}`;
 
@@ -102,6 +102,42 @@ router.get('/', auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error');
+  }
+});
+
+// Update or regenerate a story
+router.put('/:id', auth, async (req, res) => {
+  const ai = req.app.locals.ai;
+  try {
+    const story = await Story.findById(req.params.id);
+    if (!story) return res.status(404).json({ msg: 'Story not found' });
+    if (story.user.toString() !== req.user.id) return res.status(403).json({ msg: 'Not authorized' });
+
+    // If prompts provided, regenerate content using AI
+    if (req.body.prompts && ai) {
+      const systemInstruction = `You are a professional, creative fiction author. Regenerate or edit the following story content based on the user's prompts. Keep the same tone and continuity where possible unless the prompts request otherwise.`;
+      const userPrompt = `Original Story Title: "${story.title}"\nOriginal Hints: ${story.hints}\nUser Edit Prompts: ${req.body.prompts}`;
+
+      const generatedContent = await generateStoryWithRetry(ai, systemInstruction, userPrompt);
+      story.content = generatedContent;
+      story.hints = req.body.hints || story.hints;
+      if (req.body.title) story.title = req.body.title;
+      await story.save();
+      return res.json(story);
+    }
+
+    // Otherwise, allow manual updates to fields like content/title/hints/genres
+    const { content, title, hints, genres } = req.body;
+    if (content !== undefined) story.content = content;
+    if (title) story.title = title;
+    if (hints) story.hints = hints;
+    if (genres) story.genres = genres;
+
+    await story.save();
+    res.json(story);
+  } catch (err) {
+    console.error('Story update error:', err.message || err);
+    res.status(500).json({ msg: 'Server error during story update.' });
   }
 });
 

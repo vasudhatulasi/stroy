@@ -23,6 +23,9 @@
         .container {
             max-width: 900px;
             width: 100%;
+            align-items: center;
+            display: flex;
+            flex-direction: column
         }
 
         .card {
