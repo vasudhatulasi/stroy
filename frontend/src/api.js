@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: 'https://stroy-1.onrender.com',
+    baseURL: 'https://stroy-5.onrender.com',
     headers: {
         'Content-Type': 'application/json'
     }
